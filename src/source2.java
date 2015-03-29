@@ -329,7 +329,7 @@ class AwaitingPasswordState extends AbstractState {
             }
 
             if (Character.isDigit(current)) {
-                sb.append(current);
+                sb.append((char) current);
             }
 
         } while (current != -1);
@@ -342,8 +342,6 @@ class AwaitingPasswordState extends AbstractState {
             System.out.printf("[%d]: Could not parse password string.\n", this.context.getClientNumber());
         }
 
-        this.context.disconnect();
-
     }
 
     @Override
@@ -353,6 +351,8 @@ class AwaitingPasswordState extends AbstractState {
         } else {
             output.writeBytes("500 LOGIN FAILED\r\n");
         }
+
+        this.context.disconnect();
     }
 
     @Override
