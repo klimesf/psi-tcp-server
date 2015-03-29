@@ -100,11 +100,6 @@ class Client implements Runnable {
     private int calculatedPassword;
 
     /**
-     * Flag. Does the nickname begin with "Robot"?
-     */
-    private boolean beginsWithRobot;
-
-    /**
      * Constructor.
      *
      * @param socket Client's socket
@@ -157,20 +152,6 @@ class Client implements Runnable {
      */
     public int getCalculatedPassword() {
         return calculatedPassword;
-    }
-
-    /**
-     * @param robot
-     */
-    public void beginsWithRobot(boolean robot) {
-        this.beginsWithRobot = robot;
-    }
-
-    /**
-     * @return
-     */
-    public boolean isBeginsWithRobot() {
-        return beginsWithRobot;
     }
 
     /**
@@ -291,7 +272,7 @@ class AwaitingLoginState extends AbstractState {
             current = input.read();
 
             // Escape sequence met, subtract '\r' value from calculated password's value
-            if (last == '\r' && current == '\n') {
+            if ((last == '\r' && current == '\n') || input.available() < 1) {
                 calculatedPassword -= last;
                 break;
             }
@@ -338,19 +319,12 @@ class AwaitingPasswordState extends AbstractState {
         int chars = 0;
         StringBuilder sb = new StringBuilder();
 
-        this.context.disconnect();
-
         do {
             // Read the input
             current = input.read();
 
-            // Waiting too long
-            if (chars++ > maxChars) {
-                break;
-            }
-
             // Escape sequence met
-            if (last == '\r' && current == '\n') {
+            if ((last == '\r' && current == '\n') || input.available() < 1) {
                 break;
             }
 
@@ -367,6 +341,8 @@ class AwaitingPasswordState extends AbstractState {
         } catch (NumberFormatException ex) {
             System.out.printf("[%d]: Could not parse password string.\n", this.context.getClientNumber());
         }
+
+        this.context.disconnect();
 
     }
 
