@@ -1,10 +1,9 @@
 package robot;
 
-import java.io.BufferedInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Arrays;
 import java.util.Iterator;
 
@@ -38,9 +37,6 @@ public class Robot {
                 // Start client's own thread
                 Client handler = new Client(clientSocket, clientNumber++);
                 new Thread(handler).start();
-                System.out.printf("Client accepted from: %s:%d\n",
-                        clientSocket.getInetAddress().toString(),
-                        clientSocket.getLocalPort());
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
             }
@@ -118,10 +114,11 @@ class Client implements Runnable {
      * @throws IOException
      */
     public void disconnect() throws IOException {
+        System.out.printf("[%d]: Disconnecting.\n", this.getClientNumber());
         this.input.close();
         this.output.close();
         this.socket.close();
-        System.out.printf("[%d]: %s left\n", this.getClientNumber());
+        System.out.printf("[%d] left\n", this.getClientNumber());
     }
 
     /**
@@ -178,17 +175,22 @@ class Client implements Runnable {
                 this.state.setNextState();
             }
 
-            // When client signs off, close the socket
-            if (!this.socket.isClosed()) {
-                this.socket.close();
-            }
-
+        } catch (SocketException ex) {
+            System.err.printf("[%d]: Robot disconnected.\n", this.getClientNumber());
         } catch (IOException ex) {
-            System.err.printf("[%d]: An I/O exception occurred: %s, %s\n",
+            System.err.printf("[%d]: An I/O exception occurred: %s\n",
                     this.getClientNumber(),
-                    ex.getMessage(),
-                    ex.getStackTrace().toString()
+                    ex.getMessage()
             );
+            ex.printStackTrace();
+        } finally {
+            try {
+                if (!this.socket.isClosed()) {
+                    this.disconnect();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 }
@@ -241,8 +243,8 @@ class InitialState extends AbstractState {
 
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
-        System.out.printf("[%d]: Sending 200 LOGIN message.\n", this.context.getClientNumber());
         output.writeBytes("200 LOGIN\r\n");
+        System.out.printf("[%d]: Sending 200 LOGIN answer.\n", this.context.getClientNumber());
     }
 
     @Override
@@ -272,7 +274,7 @@ class AwaitingLoginState extends AbstractState {
             current = input.read();
 
             // Escape sequence met, subtract '\r' value from calculated password's value
-            if ((last == '\r' && current == '\n') || input.available() < 1) {
+            if (last == '\r' && current == '\n') {
                 calculatedPassword -= last;
                 break;
             }
@@ -290,6 +292,7 @@ class AwaitingLoginState extends AbstractState {
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
         output.writeBytes("201 PASSWORD\r\n");
+        System.out.printf("[%d]: Sending 201 PASSWORD answer.\n", this.context.getClientNumber());
     }
 
     @Override
@@ -313,10 +316,10 @@ class AwaitingPasswordState extends AbstractState {
     @Override
     public void readMessage(BufferedInputStream input) throws IOException {
 
+        System.out.printf("[%d]: Starting to read password.\n", this.context.getClientNumber());
+
         int last = 0;
         int current;
-        int maxChars = 10;
-        int chars = 0;
         StringBuilder sb = new StringBuilder();
 
         do {
@@ -324,9 +327,11 @@ class AwaitingPasswordState extends AbstractState {
             current = input.read();
 
             // Escape sequence met
-            if ((last == '\r' && current == '\n') || input.available() < 1) {
+            if (last == '\r' && current == '\n') {
                 break;
             }
+
+            last = current;
 
             if (Character.isDigit(current)) {
                 sb.append((char) current);
@@ -337,7 +342,7 @@ class AwaitingPasswordState extends AbstractState {
         try {
             int password = Integer.parseInt(sb.toString().trim());
             System.out.printf("[%d]: Accepted password: %d.\n", this.context.getClientNumber(), password);
-            this.passwordOkay = this.context.getCalculatedPassword() == password;
+            this.passwordOkay = this.context.getCalculatedPassword() == password && this.context.getCalculatedPassword() > 0;
         } catch (NumberFormatException ex) {
             System.out.printf("[%d]: Could not parse password string.\n", this.context.getClientNumber());
         }
@@ -348,11 +353,12 @@ class AwaitingPasswordState extends AbstractState {
     public void printOutput(DataOutputStream output) throws IOException {
         if (this.passwordOkay) {
             output.writeBytes("202 OK\r\n");
+            System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
         } else {
             output.writeBytes("500 LOGIN FAILED\r\n");
+            System.out.printf("[%d]: Sending 500 LOGIN FAILED answer.\n", this.context.getClientNumber());
+            this.context.disconnect();
         }
-
-        this.context.disconnect();
     }
 
     @Override
@@ -372,13 +378,69 @@ class AwaitingMessageState extends AbstractState {
 
     @Override
     public void readMessage(BufferedInputStream input) throws IOException {
-        this.context.disconnect();
+
+        int current;
+        StringBuilder sb = new StringBuilder();
+
+        current = input.read();
+        if (current != 'F' && current != 'I') {
+            System.out.printf("[%d]: Message 1st fail.\n", this.context.getClientNumber());
+            this.next = Next.INVALID;
+            return;
+        }
+        sb.append((char) current);
+
+        current = input.read();
+        if (current != 'O' && current != 'N') {
+            System.out.printf("[%d]: Message 2nd fail.\n", this.context.getClientNumber());
+            this.next = Next.INVALID;
+            return;
+        }
+        sb.append((char) current);
+
+        current = input.read();
+        if (current != 'T' && current != 'F') {
+            System.out.printf("[%d]: Message 3rd fail.\n", this.context.getClientNumber());
+            this.next = Next.INVALID;
+            return;
+        }
+        sb.append((char) current);
+
+        current = input.read();
+        if (current != 'O') {
+            System.out.printf("[%d]: Message 4th fail.\n", this.context.getClientNumber());
+            this.next = Next.INVALID;
+            return;
+        }
+        sb.append((char) current);
+
+        current = input.read();
+        if (current != ' ') {
+            System.out.printf("[%d]: Message beginning does not have ending whitespace.\n", this.context.getClientNumber());
+            this.next = Next.INVALID;
+            return;
+        }
+        sb.append((char) current);
+
+        String beginning = sb.toString();
+
+        System.out.printf("[%d]: Accepted message beginning: %s.\n", this.context.getClientNumber(), beginning);
+
+        if (beginning.equals("FOTO ")) {
+            this.next = Next.FOTO;
+        } else if (beginning.equals("INFO ")) {
+            this.next = Next.INFO;
+        } else {
+            this.next = Next.INVALID;
+        }
     }
 
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
         if (this.next == Next.INVALID) {
             output.writeBytes("501 SYNTAX ERROR\r\n");
+            System.out.printf("[%d]: Sending 501 SYNTAX ERROR answer.\n", this.context.getClientNumber());
+            this.context.disconnect();
         }
     }
 
@@ -417,11 +479,29 @@ class AwaitingINFOState extends AbstractState {
     @Override
     public void readMessage(BufferedInputStream input) throws IOException {
 
+        int current;
+        int last = 0;
+
+        do {
+            // Read the input
+            current = input.read();
+
+            // Escape sequence met
+            if (last == '\r' && current == '\n') {
+                break;
+            }
+
+            last = current;
+
+        } while (current != -1);
+
+        System.out.printf("[%d]: Accepted INFO message.\n", this.context.getClientNumber());
     }
 
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
-
+        output.writeBytes("202 OK\r\n");
+        System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
     }
 
     public void setNextState() throws IOException {
@@ -431,6 +511,8 @@ class AwaitingINFOState extends AbstractState {
 }
 
 class AwaitingFOTOState extends AbstractState {
+
+    private ChecksumStatus checksumStatus;
 
     /**
      * @param context
@@ -442,16 +524,84 @@ class AwaitingFOTOState extends AbstractState {
     @Override
     public void readMessage(BufferedInputStream input) throws IOException {
 
+        int current;
+        int last = 0;
+        int numberOfBytes = 0;
+        int counter = 0;
+        StringBuilder sb = new StringBuilder();
+        int calculatedChecksum = 0;
+        int checksum = 0;
+this.context.disconnect();
+        // Get number of bytes
+        do {
+            // Read the input
+            current = input.read();
+
+            // Escape sequence met
+            if (Character.isWhitespace(current)) {
+                break;
+            }
+
+            sb.append((char) current);
+
+        } while (current != -1);
+
+        try {
+            numberOfBytes = Integer.parseInt(sb.toString());
+        } catch (NumberFormatException ex) {
+            System.out.printf("[%d]:Could not parse FOTO byte length number.\n", this.context.getClientNumber());
+            this.checksumStatus = ChecksumStatus.INVALID_SYNTAX;
+            return;
+        }
+
+        // Calculate checksum
+        while (current != -1 && counter < numberOfBytes) {
+            // Read the input
+            current = input.read();
+            calculatedChecksum += current;
+            counter++;
+        }
+
+        // Assert checksum
+        counter = 3;
+        while (current != -1 && counter > -1) {
+            // Read the input
+            current = input.read();
+            calculatedChecksum += (current * Math.pow(16, counter--));
+            counter--;
+        }
+
+        if (checksum == calculatedChecksum) {
+            this.checksumStatus = ChecksumStatus.OK;
+        } else {
+            this.checksumStatus = ChecksumStatus.BAD;
+        }
+
+        System.out.printf("[%d]: Calculated checksum: %d.\n", this.context.getClientNumber(), calculatedChecksum);
+        System.out.printf("[%d]: Sent checksum: %d.\n", this.context.getClientNumber(), checksum);
+        System.out.printf("[%d]: Accepted FOTO message.\n", this.context.getClientNumber());
     }
 
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
-
+        if (this.checksumStatus == ChecksumStatus.BAD) {
+            System.out.printf("[%d]: Sending 300 BAD CHECKSUM answer.\n", this.context.getClientNumber());
+            output.writeBytes("300 BAD CHECKSUM\r\n");
+        } else if (this.checksumStatus == ChecksumStatus.INVALID_SYNTAX) {
+            System.out.printf("[%d]: Sending 501 SYNTAX ERROR answer.\n", this.context.getClientNumber());
+            output.writeBytes("501 SYNTAX ERROR\r\n");
+            this.context.disconnect();
+        } else {
+            output.writeBytes("202 OK\r\n");
+            System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
+        }
     }
 
     public void setNextState() throws IOException {
         System.out.printf("[%d]: Changing state to: AwaitingMessageState.\n", this.context.getClientNumber());
         this.context.setState(new AwaitingMessageState(this.context));
     }
+
+    enum ChecksumStatus {OK, INVALID_SYNTAX, BAD}
 
 }

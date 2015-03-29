@@ -38,9 +38,6 @@ public class Robot {
                 // Start client's own thread
                 Client handler = new Client(clientSocket, clientNumber++);
                 new Thread(handler).start();
-                System.out.printf("Client accepted from: %s:%d\n",
-                        clientSocket.getInetAddress().toString(),
-                        clientSocket.getLocalPort());
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
             }
