@@ -83,7 +83,7 @@ class Client implements Runnable {
     /**
      * Output stream to the client.
      */
-    private final DataOutputStream output;
+    private final BufferedOutputStream output;
 
     /**
      * State of the machine.
@@ -105,7 +105,7 @@ class Client implements Runnable {
         this.socket = socket;
         this.clientNumber = clientNumber;
         this.input = new BufferedInputStream(socket.getInputStream());
-        this.output = new DataOutputStream(socket.getOutputStream());
+        this.output = new BufferedOutputStream(socket.getOutputStream());
     }
 
     /**
@@ -203,7 +203,7 @@ interface State {
 
     void readMessage(BufferedInputStream input) throws IOException;
 
-    void printOutput(DataOutputStream output) throws IOException;
+    void printOutput(BufferedOutputStream output) throws IOException;
 
     void setNextState() throws IOException;
 
@@ -242,8 +242,9 @@ class InitialState extends AbstractState {
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
-        output.writeBytes("200 LOGIN\r\n");
+    public void printOutput(BufferedOutputStream output) throws IOException {
+        output.write("200 LOGIN\r\n".getBytes());
+        output.flush();
         System.out.printf("[%d]: Sending 200 LOGIN answer.\n", this.context.getClientNumber());
     }
 
@@ -290,8 +291,9 @@ class AwaitingLoginState extends AbstractState {
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
-        output.writeBytes("201 PASSWORD\r\n");
+    public void printOutput(BufferedOutputStream output) throws IOException {
+        output.write("201 PASSWORD\r\n".getBytes());
+        output.flush();
         System.out.printf("[%d]: Sending 201 PASSWORD answer.\n", this.context.getClientNumber());
     }
 
@@ -350,12 +352,14 @@ class AwaitingPasswordState extends AbstractState {
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
+    public void printOutput(BufferedOutputStream output) throws IOException {
         if (this.passwordOkay) {
-            output.writeBytes("202 OK\r\n");
+            output.write("202 OK\r\n".getBytes());
+            output.flush();
             System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
         } else {
-            output.writeBytes("500 LOGIN FAILED\r\n");
+            output.write("500 LOGIN FAILED\r\n".getBytes());
+            output.flush();
             System.out.printf("[%d]: Sending 500 LOGIN FAILED answer.\n", this.context.getClientNumber());
             this.context.disconnect();
         }
@@ -436,9 +440,10 @@ class AwaitingMessageState extends AbstractState {
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
+    public void printOutput(BufferedOutputStream output) throws IOException {
         if (this.next == Next.INVALID) {
-            output.writeBytes("501 SYNTAX ERROR\r\n");
+            output.write("501 SYNTAX ERROR\r\n".getBytes());
+            output.flush();
             System.out.printf("[%d]: Sending 501 SYNTAX ERROR answer.\n", this.context.getClientNumber());
             this.context.disconnect();
         }
@@ -499,8 +504,9 @@ class AwaitingINFOState extends AbstractState {
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
-        output.writeBytes("202 OK\r\n");
+    public void printOutput(BufferedOutputStream output) throws IOException {
+        output.write("202 OK\r\n".getBytes());
+        output.flush();
         System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
     }
 
@@ -531,14 +537,14 @@ class AwaitingFOTOState extends AbstractState {
         StringBuilder sb = new StringBuilder();
         int calculatedChecksum = 0;
         int checksum = 0;
-this.context.disconnect();
+
         // Get number of bytes
         do {
             // Read the input
             current = input.read();
 
             // Escape sequence met
-            if (Character.isWhitespace(current)) {
+            if (current != ' ') {
                 break;
             }
 
@@ -547,7 +553,7 @@ this.context.disconnect();
         } while (current != -1);
 
         try {
-            numberOfBytes = Integer.parseInt(sb.toString());
+            numberOfBytes = Integer.parseInt(sb.toString().trim());
         } catch (NumberFormatException ex) {
             System.out.printf("[%d]:Could not parse FOTO byte length number.\n", this.context.getClientNumber());
             this.checksumStatus = ChecksumStatus.INVALID_SYNTAX;
@@ -583,16 +589,19 @@ this.context.disconnect();
     }
 
     @Override
-    public void printOutput(DataOutputStream output) throws IOException {
+    public void printOutput(BufferedOutputStream output) throws IOException {
         if (this.checksumStatus == ChecksumStatus.BAD) {
             System.out.printf("[%d]: Sending 300 BAD CHECKSUM answer.\n", this.context.getClientNumber());
-            output.writeBytes("300 BAD CHECKSUM\r\n");
+            output.write("300 BAD CHECKSUM\r\n".getBytes());
+            output.flush();
         } else if (this.checksumStatus == ChecksumStatus.INVALID_SYNTAX) {
             System.out.printf("[%d]: Sending 501 SYNTAX ERROR answer.\n", this.context.getClientNumber());
-            output.writeBytes("501 SYNTAX ERROR\r\n");
+            output.write("501 SYNTAX ERROR\r\n".getBytes());
+            output.flush();
             this.context.disconnect();
         } else {
-            output.writeBytes("202 OK\r\n");
+            output.write("202 OK\r\n".getBytes());
+            output.flush();
             System.out.printf("[%d]: Sending 202 OK answer.\n", this.context.getClientNumber());
         }
     }
