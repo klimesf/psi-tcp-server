@@ -1,6 +1,6 @@
 package robot;
 
-import java.io.DataInputStream;
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -82,7 +82,7 @@ class Client implements Runnable {
     /**
      * Input scanner.
      */
-    private final DataInputStream input;
+    private final BufferedInputStream input;
 
     /**
      * Output stream to the client.
@@ -113,7 +113,7 @@ class Client implements Runnable {
     public Client(Socket socket, int clientNumber) throws IOException {
         this.socket = socket;
         this.clientNumber = clientNumber;
-        this.input = new DataInputStream(socket.getInputStream());
+        this.input = new BufferedInputStream(socket.getInputStream());
         this.output = new DataOutputStream(socket.getOutputStream());
     }
 
@@ -218,7 +218,7 @@ class Client implements Runnable {
  */
 interface State {
 
-    void readMessage(DataInputStream input) throws IOException;
+    void readMessage(BufferedInputStream input) throws IOException;
 
     void printOutput(DataOutputStream output) throws IOException;
 
@@ -254,7 +254,7 @@ class InitialState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) {
+    public void readMessage(BufferedInputStream input) {
         // do nothing
     }
 
@@ -280,7 +280,7 @@ class AwaitingLoginState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) throws IOException {
+    public void readMessage(BufferedInputStream input) throws IOException {
 
         int current;
         int last = 0;
@@ -330,11 +330,11 @@ class AwaitingPasswordState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) throws IOException {
+    public void readMessage(BufferedInputStream input) throws IOException {
 
         int last = 0;
         int current;
-        int maxChars = 50;
+        int maxChars = 10;
         int chars = 0;
         StringBuilder sb = new StringBuilder();
 
@@ -395,7 +395,7 @@ class AwaitingMessageState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) throws IOException {
+    public void readMessage(BufferedInputStream input) throws IOException {
         this.context.disconnect();
     }
 
@@ -439,7 +439,7 @@ class AwaitingINFOState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) throws IOException {
+    public void readMessage(BufferedInputStream input) throws IOException {
 
     }
 
@@ -464,7 +464,7 @@ class AwaitingFOTOState extends AbstractState {
     }
 
     @Override
-    public void readMessage(DataInputStream input) throws IOException {
+    public void readMessage(BufferedInputStream input) throws IOException {
 
     }
 
