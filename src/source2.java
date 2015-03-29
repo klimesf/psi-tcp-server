@@ -123,6 +123,8 @@ class Client implements Runnable {
      * @throws IOException
      */
     public void disconnect() throws IOException {
+        this.input.close();
+        this.output.close();
         this.socket.close();
         System.out.printf("[%d]: %s left\n", this.getClientNumber());
     }
@@ -289,7 +291,7 @@ class AwaitingLoginState extends AbstractState {
             current = input.read();
 
             // Escape sequence met, subtract '\r' value from calculated password's value
-            if (current == '\n' && last == '\r') {
+            if (last == '\r' && current == '\n') {
                 calculatedPassword -= last;
                 break;
             }
@@ -332,14 +334,23 @@ class AwaitingPasswordState extends AbstractState {
 
         int last = 0;
         int current;
+        int maxChars = 50;
+        int chars = 0;
         StringBuilder sb = new StringBuilder();
+
+        this.context.disconnect();
 
         do {
             // Read the input
             current = input.read();
 
+            // Waiting too long
+            if (chars++ > maxChars) {
+                break;
+            }
+
             // Escape sequence met
-            if (current == '\n' && last == '\r') {
+            if (last == '\r' && current == '\n') {
                 break;
             }
 
@@ -349,10 +360,8 @@ class AwaitingPasswordState extends AbstractState {
 
         } while (current != -1);
 
-        int password = 0;
-
         try {
-            password = Integer.parseInt(sb.toString().trim());
+            int password = Integer.parseInt(sb.toString().trim());
             System.out.printf("[%d]: Accepted password: %d.\n", this.context.getClientNumber(), password);
             this.passwordOkay = this.context.getCalculatedPassword() == password;
         } catch (NumberFormatException ex) {
@@ -387,7 +396,7 @@ class AwaitingMessageState extends AbstractState {
 
     @Override
     public void readMessage(DataInputStream input) throws IOException {
-        // TODO
+        this.context.disconnect();
     }
 
     @Override
