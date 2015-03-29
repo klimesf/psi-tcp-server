@@ -3,9 +3,9 @@ package cz.filipklimes.psi.tcp.server.states;
 import cz.filipklimes.psi.tcp.server.Client;
 import cz.filipklimes.psi.tcp.server.InfoLogger;
 
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.Scanner;
 
 /**
  * @author klimesf
@@ -25,8 +25,8 @@ public class AwaitingMessageState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String message = input.next();
+    public void readMessage(BufferedInputStream input) throws IOException {
+        String message = this.loadMessage(input);
         this.messageStatus = this.parseMessage(message);
     }
 
@@ -96,5 +96,4 @@ public class AwaitingMessageState extends AbstractState implements State {
     private SyntaxStatus parseFotoMessage(String message) {
         return SyntaxStatus.OKAY;
     }
-
 }

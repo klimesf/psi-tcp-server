@@ -3,13 +3,10 @@ package cz.filipklimes.psi.tcp.server;
 import cz.filipklimes.psi.tcp.server.states.InitialState;
 import cz.filipklimes.psi.tcp.server.states.State;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.Socket;
-import java.nio.CharBuffer;
-import java.util.Scanner;
 
 /**
  * @author klimesf
@@ -29,7 +26,7 @@ public class Client implements Runnable {
     /**
      * Input scanner.
      */
-    private final Scanner input;
+    private final BufferedInputStream input;
 
     /**
      * Output stream to the client.
@@ -49,7 +46,7 @@ public class Client implements Runnable {
      */
     public Client(Socket socket) throws IOException {
         this.socket = socket;
-        this.input = new Scanner(socket.getInputStream());
+        this.input = new BufferedInputStream(socket.getInputStream());
         this.output = new DataOutputStream(socket.getOutputStream());
     }
 
@@ -59,7 +56,9 @@ public class Client implements Runnable {
      * @throws IOException
      */
     public void disconnect() throws IOException {
-        socket.close();
+        this.input.close();
+        this.output.close();
+        this.socket.close();
         System.out.printf("%s left\n", this.nickname);
     }
 
@@ -101,21 +100,13 @@ public class Client implements Runnable {
     @Override
     public void run() {
         try {
-//
-//            BufferedReader br = new BufferedReader(
-//                    new InputStreamReader(
-//                            socket.getInputStream()));
-//            char[] charBuffer = new char[1024];
-//            br.read(charBuffer);
-//            System.out.println(charBuffer);
-
             // Server talks first
             this.state.readMessage(this.input);
             this.state.printOutput(this.output);
             this.state.setNextState();
 
             // Continue in loop while client talks
-            while (this.input.hasNext()) {
+            while (this.input.available() > 0 && !this.socket.isClosed()) {
                 // Server shutting down
                 if (Thread.currentThread().isInterrupted()) {
                     break;

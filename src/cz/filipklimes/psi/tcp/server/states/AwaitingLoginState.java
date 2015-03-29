@@ -2,16 +2,14 @@ package cz.filipklimes.psi.tcp.server.states;
 
 import cz.filipklimes.psi.tcp.server.Client;
 
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.Scanner;
 
 /**
  * @author klimesf
  */
 public class AwaitingLoginState extends AbstractState implements State {
-
-    private boolean nicknameOkay;
 
     /**
      * @param context
@@ -21,9 +19,9 @@ public class AwaitingLoginState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String nickname = input.next();
-        this.context.setNickname(nickname);
+    public void readMessage(BufferedInputStream input) throws IOException {
+        String message = this.loadMessage(input);
+        this.context.setNickname(message);
     }
 
     @Override
@@ -35,5 +33,4 @@ public class AwaitingLoginState extends AbstractState implements State {
     public void setNextState() throws IOException {
         this.context.setState(new AwaitingPasswordState(this.context));
     }
-
 }

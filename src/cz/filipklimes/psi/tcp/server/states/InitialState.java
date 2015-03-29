@@ -2,6 +2,7 @@ package cz.filipklimes.psi.tcp.server.states;
 
 import cz.filipklimes.psi.tcp.server.Client;
 
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Scanner;
@@ -18,7 +19,7 @@ public class InitialState extends AbstractState {
     }
 
     @Override
-    public void readMessage(Scanner input) {
+    public void readMessage(BufferedInputStream input) {
         // do nothing
     }
 
@@ -31,6 +32,4 @@ public class InitialState extends AbstractState {
     public void setNextState() {
         this.context.setState(new AwaitingLoginState(this.context));
     }
-
-
 }

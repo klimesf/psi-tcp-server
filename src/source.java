@@ -1,12 +1,12 @@
-package robot;
+package robot1;
 
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.Scanner;
 
 /**
  * @author klimesf
@@ -31,15 +31,15 @@ public class Robot {
             return;
         }
 
-
+        int clientNumber = 1;
         while (true) {
             try {
                 Socket clientSocket = serverSocket.accept();
                 // Start client's own thread
-                Client handler = new Client(clientSocket);
+                Client handler = new Client(clientSocket, clientNumber++);
                 new Thread(handler).start();
-                System.out.printf("Client accepted from: %n:%n\n",
-                        clientSocket.getInetAddress(),
+                System.out.printf("Client accepted from: %s:%d\n",
+                        clientSocket.getInetAddress().toString(),
                         clientSocket.getLocalPort());
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
@@ -63,15 +63,11 @@ public class Robot {
     }
 
 }
+
 /**
  * @author klimesf
  */
 class Client implements Runnable {
-
-    /**
-     * Nickname of the client.
-     */
-    private String nickname;
 
     /**
      * Socket of the client.
@@ -79,9 +75,14 @@ class Client implements Runnable {
     private final Socket socket;
 
     /**
+     * Clients number.
+     */
+    private int clientNumber;
+
+    /**
      * Input scanner.
      */
-    private final Scanner input;
+    private final DataInputStream input;
 
     /**
      * Output stream to the client.
@@ -94,14 +95,25 @@ class Client implements Runnable {
     private State state = new InitialState(this);
 
     /**
+     * Calculated password of the client.
+     */
+    private int calculatedPassword;
+
+    /**
+     * Flag. Does the nickname begin with "Robot"?
+     */
+    private boolean beginsWithRobot;
+
+    /**
      * Constructor.
      *
      * @param socket Client's socket
      * @throws java.io.IOException
      */
-    public Client(Socket socket) throws IOException {
+    public Client(Socket socket, int clientNumber) throws IOException {
         this.socket = socket;
-        this.input = new Scanner(socket.getInputStream());
+        this.clientNumber = clientNumber;
+        this.input = new DataInputStream(socket.getInputStream());
         this.output = new DataOutputStream(socket.getOutputStream());
     }
 
@@ -111,26 +123,19 @@ class Client implements Runnable {
      * @throws IOException
      */
     public void disconnect() throws IOException {
-        socket.close();
-        System.out.printf("%s left\n", this.nickname);
+//        this.input.close();
+//        this.output.close();
+        this.socket.close();
+        System.out.printf("[%d]: %s left\n", this.getClientNumber());
     }
 
     /**
-     * Sets nickname of the client.
+     * Returns client's number.
      *
-     * @param nickname
+     * @return Number of the client.
      */
-    public void setNickname(String nickname) {
-        this.nickname = nickname;
-    }
-
-    /**
-     * Returns nickname of the client.
-     *
-     * @return Client robot's nickname.
-     */
-    public String getNickname() {
-        return nickname;
+    public int getClientNumber() {
+        return clientNumber;
     }
 
     /**
@@ -141,33 +146,47 @@ class Client implements Runnable {
     }
 
     /**
-     * Runs the Client.
+     * @param calculatedPassword
+     */
+    public void setCalculatedPassword(int calculatedPassword) {
+        this.calculatedPassword = calculatedPassword;
+    }
+
+    /**
+     * @return
+     */
+    public int getCalculatedPassword() {
+        return calculatedPassword;
+    }
+
+    /**
+     * @param robot
+     */
+    public void beginsWithRobot(boolean robot) {
+        this.beginsWithRobot = robot;
+    }
+
+    /**
+     * @return
+     */
+    public boolean isBeginsWithRobot() {
+        return beginsWithRobot;
+    }
+
+    /**
+     * Serves the Client.
      * Runnable interface method implementation.
-     * <p/>
-     * <p>
-     * Reads input from the client and creates corresponding Action instances.
-     * First command from the client must be NICK. Supported commands are:
-     * NICK, SEND, ENTER, LEAVE, CREATE and BYE.
-     * </p>
      */
     @Override
     public void run() {
         try {
-//
-//            BufferedReader br = new BufferedReader(
-//                    new InputStreamReader(
-//                            socket.getInputStream()));
-//            char[] charBuffer = new char[1024];
-//            br.read(charBuffer);
-//            System.out.println(charBuffer);
-
             // Server talks first
             this.state.readMessage(this.input);
             this.state.printOutput(this.output);
             this.state.setNextState();
 
             // Continue in loop while client talks
-            while (this.input.hasNext()) {
+            while (!this.socket.isClosed()) {
                 // Server shutting down
                 if (Thread.currentThread().isInterrupted()) {
                     break;
@@ -179,10 +198,16 @@ class Client implements Runnable {
             }
 
             // When client signs off, close the socket
-            this.socket.close();
+            if (!this.socket.isClosed()) {
+                this.socket.close();
+            }
 
         } catch (IOException ex) {
-            System.err.println("An I/O exception occurred.");
+            System.err.printf("[%d]: An I/O exception occurred: %s, %s\n",
+                    this.getClientNumber(),
+                    ex.getMessage(),
+                    ex.getStackTrace().toString()
+            );
         }
     }
 }
@@ -193,7 +218,7 @@ class Client implements Runnable {
  */
 interface State {
 
-    void readMessage(Scanner input);
+    void readMessage(DataInputStream input) throws IOException;
 
     void printOutput(DataOutputStream output) throws IOException;
 
@@ -219,6 +244,61 @@ abstract class AbstractState implements State {
         this.context = context;
     }
 
+    /**
+     * Loads message from BufferedReader.
+     *
+     * @param input Input from client.
+     * @return The message.
+     * @throws IOException
+     */
+    public String loadMessage(DataInputStream input) throws IOException {
+        return loadMessage(input, true);
+    }
+
+    /**
+     * Loads message from BufferedReader.
+     *
+     * @param input Input from client.
+     * @return The message.
+     * @throws IOException
+     */
+    public String loadMessage(DataInputStream input, boolean skipEmpty) throws IOException {
+        String message;
+        StringBuilder sb = new StringBuilder(2 << 19);
+        char lastChar = ' ';
+        char currentChar;
+        int length = 0;
+
+        while (input.available() > 0) {
+
+            int currentByte = input.read();
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+            currentChar = (char) currentByte;
+            ++length;
+
+            if (lastChar == '\r' && currentChar == '\n') {
+                break;
+            }
+            sb.append(currentChar);
+            lastChar = currentChar;
+        }
+        if (length < 1024) {
+            message = sb.toString();
+        } else {
+            message = "--too long--";
+        }
+
+        // Skip empty message
+        if (skipEmpty && message.length() < 1) {
+            return loadMessage(input);
+        } else {
+            return message.trim();
+        }
+    }
+
 }
 
 
@@ -226,8 +306,6 @@ abstract class AbstractState implements State {
  * @author klimesf
  */
 class AwaitingLoginState extends AbstractState implements State {
-
-    private boolean nicknameOkay;
 
     /**
      * @param context
@@ -237,9 +315,52 @@ class AwaitingLoginState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String nickname = input.next();
-        this.context.setNickname(nickname);
+    public String loadMessage(DataInputStream input) throws IOException {
+        char lastChar = ' ';
+        char currentChar;
+        int calculatedPassword = 0;
+        int length = 0;
+        StringBuilder sb = new StringBuilder(5);
+
+        while (true) {
+            if (input.available() > 0) {
+                break;
+            }
+        }
+
+        while (input.available() > 0) {
+
+            int currentByte = input.read();
+
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+
+            currentChar = (char) currentByte;
+            if (length < 5) {
+                sb.append(currentChar);
+            }
+            ++length;
+
+
+            if (lastChar == '\r' && currentChar == '\n') {
+                break;
+            }
+            if (!Character.isWhitespace(currentChar)) {
+                calculatedPassword += (int) currentChar;
+            }
+            lastChar = currentChar;
+        }
+        this.context.beginsWithRobot(sb.toString().trim().equals("Robot"));
+        this.context.setCalculatedPassword(calculatedPassword);
+        return "";
+    }
+
+    @Override
+    public void readMessage(DataInputStream input) throws IOException {
+        String nickname = this.loadMessage(input);
+        System.out.printf("[%d]: Accepted nickname: %s. Calculated password is %d.%n", this.context.getClientNumber(), nickname, this.context.getCalculatedPassword());
     }
 
     @Override
@@ -249,9 +370,9 @@ class AwaitingLoginState extends AbstractState implements State {
 
     @Override
     public void setNextState() throws IOException {
+        System.out.printf("[%d]: Changing state to: AwaitingPasswordState\n", this.context.getClientNumber());
         this.context.setState(new AwaitingPasswordState(this.context));
     }
-
 }
 
 
@@ -273,8 +394,9 @@ class AwaitingPasswordState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String password = input.next();
+    public void readMessage(DataInputStream input) throws IOException {
+        String password = this.loadMessage(input);
+        System.out.printf("[%d]: Accepted password: %s%n", this.context.getClientNumber(), password);
         this.passwordOkay = this.checkPassword(password);
     }
 
@@ -290,8 +412,10 @@ class AwaitingPasswordState extends AbstractState implements State {
     @Override
     public void setNextState() throws IOException {
         if (this.passwordOkay) {
+            System.out.printf("[%d]: Changing state to: AwaitingMessageState.\n", this.context.getClientNumber());
             this.context.setState(new AwaitingMessageState(this.context));
         } else {
+            System.out.printf("[%d]: Couldn't change to next state, wrong password.\n", this.context.getClientNumber());
             this.context.disconnect();
         }
     }
@@ -303,24 +427,16 @@ class AwaitingPasswordState extends AbstractState implements State {
      * @return TRUE if okay, FALSE if not.
      */
     private boolean checkPassword(String password) {
-        // Obtain nickname
-        String nickname = this.context.getNickname();
-
-        // Check nickname
-        if (!nickname.startsWith("Robot")) {
-            return false;
-        }
-
-        // Calculate correct password
-        int calculatedPasword = 0;
-        for (char c : nickname.toCharArray()) {
-            calculatedPasword += Character.getNumericValue(c);
-        }
+        System.out.printf("[%d]: Calculated password: %d\n", this.context.getClientNumber(), this.context.getCalculatedPassword());
+        System.out.printf("[%d]: Sent password: %s\n", this.context.getClientNumber(), password);
 
         // Compare sent and calculated password
-        return calculatedPasword == Integer.parseInt(password.trim());
+        try {
+            return this.context.isBeginsWithRobot() && this.context.getCalculatedPassword() == Integer.parseInt(password.trim());
+        } catch (NumberFormatException ex) {
+            return false;
+        }
     }
-
 }
 
 /**
@@ -335,20 +451,21 @@ class InitialState extends AbstractState {
     }
 
     @Override
-    public void readMessage(Scanner input) {
+    public void readMessage(DataInputStream input) {
         // do nothing
     }
 
     @Override
     public void printOutput(DataOutputStream output) throws IOException {
+        System.out.printf("[%d]: Sending 200 LOGIN message.\n", this.context.getClientNumber());
         output.writeBytes("200 LOGIN\r\n");
     }
 
     @Override
     public void setNextState() {
+        System.out.printf("[%d]: Changing state to: AwaitingLoginState.\n", this.context.getClientNumber());
         this.context.setState(new AwaitingLoginState(this.context));
     }
-
 }
 
 
@@ -363,6 +480,16 @@ class AwaitingMessageState extends AbstractState implements State {
     private SyntaxStatus messageStatus;
 
     /**
+     * Flag. Is the checksum okay?
+     */
+    private boolean checksumOkay;
+
+    /**
+     * Flag. Is FOTO syntax okay?
+     */
+    private boolean syntaxOkay;
+
+    /**
      * @param context
      */
     public AwaitingMessageState(Client context) {
@@ -370,8 +497,142 @@ class AwaitingMessageState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String message = input.next();
+    public String loadMessage(DataInputStream input) throws IOException {
+        String message;
+        StringBuilder sb = new StringBuilder(2 << 19);
+
+        char currentChar;
+        int length = 0;
+
+        while (length < 5 && input.available() > 0) {
+
+            int currentByte = input.read();
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+
+            currentChar = (char) currentByte;
+            if (length > 0 || !Character.isWhitespace(currentChar)) {
+                ++length;
+                sb.append(currentChar);
+            }
+        }
+
+        message = sb.toString();
+
+        System.out.printf("[%d]: message beginning: %s\n", this.context.getClientNumber(), message);
+
+        if (message.equals("FOTO ")) {
+            System.out.printf("[%d]: parsing as FOTO message.\n", this.context.getClientNumber());
+            return message + this.loadFotoMessage(input);
+        } else {
+            System.out.printf("[%d]: parsing as INFO message.\n", this.context.getClientNumber());
+            return message + this.loadInfoMessage(input);
+        }
+    }
+
+    /**
+     * @param input
+     * @return
+     * @throws IOException
+     */
+    private String loadInfoMessage(DataInputStream input) throws IOException {
+        char lastChar = ' ';
+        char currentChar;
+//        StringBuilder sb = new StringBuilder();
+        int length = 0;
+        while (input.available() > 0) {
+            int currentByte = input.read();
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+            currentChar = (char) currentByte;
+            if (lastChar == '\r' && currentChar == '\n') {
+                break;
+            }
+            ++length;
+//            sb.append(currentChar);
+            lastChar = currentChar;
+        }
+
+//        if(length > 1024) {
+            return "-- too long --";
+//        } else {
+//            return sb.toString();
+//        }
+    }
+
+    /**
+     * @param input
+     * @return
+     * @throws IOException
+     */
+    private String loadFotoMessage(DataInputStream input) throws IOException {
+        char lastChar = 'x';
+        char currentChar;
+        int length;
+
+        StringBuilder numberOfBytesBuilder = new StringBuilder();
+        while (input.available() > 0 && !Character.isWhitespace(lastChar)) {
+            currentChar = (char) input.read();
+            numberOfBytesBuilder.append(currentChar);
+            lastChar = currentChar;
+        }
+        int messageLength = Integer.parseInt(numberOfBytesBuilder.toString().trim());
+
+        if(messageLength < 1) {
+            this.syntaxOkay = false;
+        }
+
+        System.out.printf("[%d]: FOTO message length is %d.\n", this.context.getClientNumber(), messageLength);
+
+        // Load the image and calc checksum
+        int checksum = 0;
+        length = 0;
+        while (length < messageLength && input.available() > 0) {
+
+            int currentByte = input.read();
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+
+            currentChar = (char) currentByte;
+            checksum += (int) currentChar;
+            ++length;
+            // TODO save image?
+        }
+
+        // Checksum
+        System.out.printf("[%d]: Calculated checksum is %d.\n", this.context.getClientNumber(), checksum);
+
+        // Check if the checksum is correct
+        length = 4;
+        int sentChecksum = 0;
+        while (length > 0 && input.available() > 0) {
+
+            int currentByte = input.read();
+            if (currentByte == -1) {
+                System.out.printf("[%d]: Current byte is -1.\n", this.context.getClientNumber());
+                return null;
+            }
+
+            currentChar = (char) currentByte;
+            checksum += ((int) currentChar) * (Math.pow(16, length));
+            --length;
+        }
+        System.out.printf("[%d]: Sent checksum is %d.\n", this.context.getClientNumber(), sentChecksum);
+        this.checksumOkay = checksum == sentChecksum;
+
+        return "";
+    }
+
+    @Override
+    public void readMessage(DataInputStream input) throws IOException {
+        String message = this.loadMessage(input);
+        System.out.printf("[%d]: Accepted new message(length = %d): %s\n", this.context.getClientNumber(), message.length(), message);
         this.messageStatus = this.parseMessage(message);
     }
 
@@ -386,6 +647,9 @@ class AwaitingMessageState extends AbstractState implements State {
                 output.writeBytes("300 BAD CHECKSUM\r\n");
                 break;
 
+            case EMPTY:
+                break;
+
             case BAD_SYNTAX:
             default:
                 output.writeBytes("501 SYNTAX ERROR\r\n");
@@ -398,11 +662,15 @@ class AwaitingMessageState extends AbstractState implements State {
         switch (this.messageStatus) {
             case OKAY:
             case BAD_CHECKSUM:
+                System.out.printf("[%d]: Changing state to: AwaitingMessageState.\n", this.context.getClientNumber());
+            case EMPTY:
                 this.context.setState(new AwaitingMessageState(this.context));
                 break;
 
+
             case BAD_SYNTAX:
             default:
+                System.out.printf("[%d]: Disconnecting, bad syntax.\n", this.context.getClientNumber());
                 this.context.disconnect();
                 break;
         }
@@ -412,7 +680,7 @@ class AwaitingMessageState extends AbstractState implements State {
      * Syntax status of the message.
      */
     private enum SyntaxStatus {
-        BAD_SYNTAX, BAD_CHECKSUM, OKAY
+        BAD_SYNTAX, BAD_CHECKSUM, EMPTY, OKAY
     }
 
     /**
@@ -422,10 +690,12 @@ class AwaitingMessageState extends AbstractState implements State {
      * @return Syntax status of the message.
      */
     private SyntaxStatus parseMessage(String message) {
-        if (message.startsWith("INFO")) {
+        if (message.startsWith("INFO ")) {
             return this.parseInfoMessage(message);
-        } else if (message.startsWith("FOTO")) {
+        } else if (message.startsWith("FOTO ")) {
             return this.parseFotoMessage(message);
+        } else if (message.length() < 1) {
+            return SyntaxStatus.EMPTY;
         } else {
             return SyntaxStatus.BAD_SYNTAX;
         }
@@ -434,14 +704,17 @@ class AwaitingMessageState extends AbstractState implements State {
     private SyntaxStatus parseInfoMessage(String message) {
         String log = message.substring(5);
         InfoLogger.getInstance().saveLog(log);
-        System.out.printf("%s: %s", this.context.getNickname(), log);
+        System.out.printf("[%d]: LOG: %s\n", this.context.getClientNumber(), log);
         return SyntaxStatus.OKAY;
     }
 
     private SyntaxStatus parseFotoMessage(String message) {
-        return SyntaxStatus.OKAY;
+        if(this.syntaxOkay) {
+            return this.checksumOkay ? SyntaxStatus.OKAY : SyntaxStatus.BAD_CHECKSUM;
+        } else {
+            return SyntaxStatus.BAD_SYNTAX;
+        }
     }
-
 }
 
 
@@ -465,5 +738,4 @@ class InfoLogger {
     public void saveLog(String log) {
 
     }
-
 }

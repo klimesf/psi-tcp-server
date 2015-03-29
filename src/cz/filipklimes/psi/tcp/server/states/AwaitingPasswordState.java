@@ -2,9 +2,9 @@ package cz.filipklimes.psi.tcp.server.states;
 
 import cz.filipklimes.psi.tcp.server.Client;
 
+import java.io.BufferedInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.Scanner;
 
 /**
  * @author klimesf
@@ -24,8 +24,8 @@ public class AwaitingPasswordState extends AbstractState implements State {
     }
 
     @Override
-    public void readMessage(Scanner input) {
-        String password = input.next();
+    public void readMessage(BufferedInputStream input) throws IOException {
+        String password = this.loadMessage(input);
         this.passwordOkay = this.checkPassword(password);
     }
 
@@ -71,5 +71,4 @@ public class AwaitingPasswordState extends AbstractState implements State {
         // Compare sent and calculated password
         return calculatedPasword == Integer.parseInt(password.trim());
     }
-
 }
