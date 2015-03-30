@@ -531,12 +531,11 @@ class AwaitingFOTOState extends AbstractState {
     public void readMessage(BufferedInputStream input) throws IOException {
 
         int current;
-        int last = 0;
-        int numberOfBytes = 0;
+        int numberOfBytes;
         int counter = 0;
         StringBuilder sb = new StringBuilder();
-        int calculatedChecksum = 0;
-        int checksum = 0;
+        long calculatedChecksum = 0;
+        long checksum = 0;
 
         // Get number of bytes
         do {
@@ -544,23 +543,26 @@ class AwaitingFOTOState extends AbstractState {
             current = input.read();
 
             // Escape sequence met
-            if (current != ' ') {
+            if (current == ' ' || this.context.getClientNumber() == 12) {
                 break;
             }
 
             sb.append((char) current);
+            ++counter;
 
         } while (current != -1);
 
         try {
             numberOfBytes = Integer.parseInt(sb.toString().trim());
+            System.out.printf("[%d]: Length of FOTO will be: %d\n", this.context.getClientNumber(), numberOfBytes);
         } catch (NumberFormatException ex) {
-            System.out.printf("[%d]:Could not parse FOTO byte length number.\n", this.context.getClientNumber());
+            System.out.printf("[%d]: Could not parse FOTO byte length number: %s\n", this.context.getClientNumber(), sb.toString().trim());
             this.checksumStatus = ChecksumStatus.INVALID_SYNTAX;
             return;
         }
 
         // Calculate checksum
+        counter = 0;
         while (current != -1 && counter < numberOfBytes) {
             // Read the input
             current = input.read();
@@ -570,11 +572,19 @@ class AwaitingFOTOState extends AbstractState {
 
         // Assert checksum
         counter = 3;
+        StringBuilder checksumStringBuilder = new StringBuilder();
         while (current != -1 && counter > -1) {
             // Read the input
             current = input.read();
-            calculatedChecksum += (current * Math.pow(16, counter--));
+            checksumStringBuilder.append(Integer.toHexString(current));
+            System.out.printf("[%d]: Checksum byte: %d = %c.\n", this.context.getClientNumber(), current, (char) current);
             counter--;
+        }
+
+        try {
+            checksum = Integer.parseInt(checksumStringBuilder.toString().trim(), 16);
+        } catch (NumberFormatException ex) {
+            checksum = -1;
         }
 
         if (checksum == calculatedChecksum) {
@@ -585,6 +595,7 @@ class AwaitingFOTOState extends AbstractState {
 
         System.out.printf("[%d]: Calculated checksum: %d.\n", this.context.getClientNumber(), calculatedChecksum);
         System.out.printf("[%d]: Sent checksum: %d.\n", this.context.getClientNumber(), checksum);
+        System.out.printf("[%d]: Accepted checksum string: %s.\n", this.context.getClientNumber(), checksumStringBuilder.toString());
         System.out.printf("[%d]: Accepted FOTO message.\n", this.context.getClientNumber());
     }
 
