@@ -550,15 +550,32 @@ class AwaitingFOTOState extends AbstractState {
         super(context);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void readMessage(BufferedInputStream input) throws IOException {
+        int numberOfBytes;
+        long calculatedChecksum;
+
+        numberOfBytes = readNumberOfBytes(input);
+        if (numberOfBytes < 0) return;
+
+        calculatedChecksum = readPhoto(input, numberOfBytes);
+        assertChecksum(input, calculatedChecksum);
+    }
+
+    /**
+     * Reads info about how many bytes the photo will have.
+     *
+     * @param input Input stream.
+     * @return Number of bytes or -1 if invalid data were provided.
+     * @throws IOException
+     */
+    private int readNumberOfBytes(BufferedInputStream input) throws IOException {
 
         int current;
-        int numberOfBytes;
-        int counter = 0;
         StringBuilder sb = new StringBuilder();
-        long calculatedChecksum = 0;
-        long checksum = 0;
 
         // Get number of bytes
         do {
@@ -571,53 +588,64 @@ class AwaitingFOTOState extends AbstractState {
             }
 
             sb.append((char) current);
-            ++counter;
 
         } while (current != -1);
 
         try {
-            numberOfBytes = Integer.parseInt(sb.toString().trim());
+            int numberOfBytes = Integer.parseInt(sb.toString().trim());
             System.out.printf("[%d]: Length of FOTO will be: %d\n", this.context.getClientNumber(), numberOfBytes);
+            return numberOfBytes;
         } catch (NumberFormatException ex) {
             System.out.printf("[%d]: Could not parse FOTO byte length number: %s\n", this.context.getClientNumber(), sb.toString().trim());
             this.checksumStatus = ChecksumStatus.INVALID_SYNTAX;
-            return;
+            return -1;
         }
+    }
+
+    /**
+     * Reads the photo and saves it to a file.
+     *
+     * @param input         Input stream.
+     * @param numberOfBytes Number of bytes of the photo.
+     * @return Calculated checksum of the photo.
+     * @throws IOException
+     */
+    private long readPhoto(BufferedInputStream input, int numberOfBytes) throws IOException {
+
+        int counter = 0;
+        int current = 0;
+        long calculatedChecksum = 0;
 
         // Prepare file
-        FileWriter fw;
-        BufferedWriter bw = null;
-        try {
-            File file = new File("photo.jpg");
-            if (!file.exists()) {
-                file.createNewFile();
-            }
-
-            fw = new FileWriter(file.getAbsoluteFile());
-            bw = new BufferedWriter(fw);
-        } catch (IOException ex) {
-            // Do nothing
-        }
+        PhotoFileHandler photoFileHandler = SingletonPhotoFileHandlerImpl.getInstance();
+        photoFileHandler.createFile("photo.jpg");
 
         // Calculate checksum and save the photo to file
-        counter = 0;
         while (current != -1 && counter < numberOfBytes) {
             // Read the input
             current = input.read();
             calculatedChecksum += current;
             counter++;
-            if (bw != null) {
-                bw.write((char) current);
-            }
+            photoFileHandler.appendChar((char) current);
         }
-        if (bw != null) {
-            bw.flush();
-            bw.close();
-        }
+        photoFileHandler.close();
+        return calculatedChecksum;
+    }
 
-        // Assert checksum
+    /**
+     * Reads and asserts the checksum of the photo.
+     *
+     * @param input              Input stream.
+     * @param calculatedChecksum Calculated checksum of the accepted photo.
+     * @throws IOException
+     */
+    private void assertChecksum(BufferedInputStream input, long calculatedChecksum) throws IOException {
+        int counter;
+        int current = 0;
+        long checksum;// Assert checksum
         counter = 3;
         StringBuilder checksumStringBuilder = new StringBuilder();
+
         while (current != -1 && counter > -1) {
             // Read the input
             current = input.read();
@@ -644,6 +672,9 @@ class AwaitingFOTOState extends AbstractState {
         System.out.printf("[%d]: Accepted FOTO message.\n", this.context.getClientNumber());
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void printOutput(BufferedOutputStream output) throws IOException {
         if (this.checksumStatus == ChecksumStatus.BAD) {
@@ -662,11 +693,134 @@ class AwaitingFOTOState extends AbstractState {
         }
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public void setNextState() throws IOException {
         System.out.printf("[%d]: Changing state to: AwaitingMessageState.\n", this.context.getClientNumber());
         this.context.setState(new AwaitingMessageState(this.context));
     }
 
-    enum ChecksumStatus {OK, INVALID_SYNTAX, BAD}
+    /**
+     * Status of the incoming message.
+     */
+    enum ChecksumStatus {
+        OK, INVALID_SYNTAX, BAD
+    }
+}
 
+interface PhotoFileHandler {
+
+    /**
+     * Opens file to be appended. If the file does not exist, creates a new one.
+     * <p/>
+     * <p>
+     * If a file was opened previously, another call of this function
+     * closes the output streams and opens new ones.
+     * </p>
+     *
+     * @param fileName Name of the file to be created.
+     * @return true if file was opened successfully, false if not.
+     */
+    boolean createFile(String fileName);
+
+    /**
+     * Appends char to the open file.
+     *
+     * @param c The char to be appended.
+     * @return true if char was appended successfully, false if not.
+     */
+    boolean appendChar(char c);
+
+    /**
+     * Flushes the buffers and closes the open file.
+     *
+     * @return true if file was appended to and closed successfully, false if not.
+     */
+    public boolean close();
+
+}
+
+class SingletonPhotoFileHandlerImpl implements PhotoFileHandler {
+
+    private static SingletonPhotoFileHandlerImpl instance;
+    private FileWriter fw;
+    private BufferedWriter bw;
+
+    /**
+     * Private constructor following Singleton pattern.
+     */
+    private SingletonPhotoFileHandlerImpl() {
+    }
+
+    /**
+     * Returns instance of the PhotoFileHandler singleton.
+     * The instance is lazy loaded.
+     *
+     * @return The instance.
+     */
+    public static SingletonPhotoFileHandlerImpl getInstance() {
+        if (instance == null) {
+            instance = new SingletonPhotoFileHandlerImpl();
+        }
+        return instance;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public boolean createFile(String fileName) {
+        try {
+            // If file was opened previously, close the streams
+            if (bw != null) {
+                this.close();
+            }
+
+            File file = new File(fileName);
+            if (!file.exists()) {
+                file.createNewFile();
+            }
+
+            fw = new FileWriter(file.getAbsoluteFile());
+            bw = new BufferedWriter(fw, 2 << 19);
+
+            return true;
+
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public boolean appendChar(char c) {
+        try {
+            if (bw != null) {
+                bw.write(c);
+                return true;
+            } else {
+                return false;
+            }
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public boolean close() {
+        try {
+            if (bw != null) {
+                bw.flush();
+                bw.close();
+                return true;
+            } else {
+                return false;
+            }
+        } catch (IOException e) {
+            return false;
+        }
+    }
 }

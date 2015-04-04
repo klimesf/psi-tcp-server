@@ -29,16 +29,13 @@ public class Robot {
             return;
         }
 
-
+        int clientNumber = 1;
         while (true) {
             try {
                 Socket clientSocket = serverSocket.accept();
                 // Start client's own thread
-                Client handler = new Client(clientSocket);
+                Client handler = new Client(clientSocket, clientNumber++);
                 new Thread(handler).start();
-                System.out.printf("Client accepted from: %n:%n\n",
-                        clientSocket.getInetAddress(),
-                        clientSocket.getLocalPort());
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
             }
@@ -59,5 +56,4 @@ public class Robot {
         }
         return port;
     }
-
 }
