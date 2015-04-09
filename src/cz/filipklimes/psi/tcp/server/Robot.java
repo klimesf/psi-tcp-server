@@ -12,6 +12,11 @@ import java.util.Iterator;
 public class Robot {
 
     /**
+     * Timeout for a client handler in seconds.
+     */
+    public static final int TIMEOUT_IN_SECONDS = 45;
+
+    /**
      * Launches the Server and listens on given port.
      * When a new client connects, starts a new thread which then communicates with the client.
      *
@@ -20,7 +25,7 @@ public class Robot {
     public static void main(String[] args) {
         ServerSocket serverSocket;
         int port = Robot.parsePort(args); // Get port number from arguments
-
+        System.out.println(port);
         try {
             serverSocket = new ServerSocket(port);
         } catch (IOException ex) {
@@ -35,7 +40,8 @@ public class Robot {
                 Socket clientSocket = serverSocket.accept();
                 // Start client's own thread
                 Client handler = new Client(clientSocket, clientNumber++);
-                new Thread(handler).start();
+                Runnable clientExecutor = new ClientHandlerExecutor(handler, clientSocket);
+                new Thread(clientExecutor).start();
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
             }

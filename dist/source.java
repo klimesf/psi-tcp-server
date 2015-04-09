@@ -6,11 +6,17 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.concurrent.*;
 
 /**
  * @author klimesf
  */
 public class Robot {
+
+    /**
+     * Timeout for a client handler in seconds.
+     */
+    public static final int TIMEOUT_IN_SECONDS = 45;
 
     /**
      * Launches the Server and listens on given port.
@@ -21,7 +27,7 @@ public class Robot {
     public static void main(String[] args) {
         ServerSocket serverSocket;
         int port = Robot.parsePort(args); // Get port number from arguments
-
+        System.out.println(port);
         try {
             serverSocket = new ServerSocket(port);
         } catch (IOException ex) {
@@ -36,7 +42,8 @@ public class Robot {
                 Socket clientSocket = serverSocket.accept();
                 // Start client's own thread
                 Client handler = new Client(clientSocket, clientNumber++);
-                new Thread(handler).start();
+                Runnable clientExecutor = new ClientHandlerExecutor(handler, clientSocket);
+                new Thread(clientExecutor).start();
             } catch (IOException ex) {
                 System.err.println("Accept failed.");
             }
@@ -57,8 +64,39 @@ public class Robot {
         }
         return port;
     }
-
 }
+
+class ClientHandlerExecutor implements Runnable {
+
+    private Client handler;
+    private Socket socket;
+    private BufferedOutputStream outputStream;
+
+    public ClientHandlerExecutor(Client handler, Socket socket) throws IOException {
+        this.handler = handler;
+        this.socket = socket;
+        this.outputStream = new BufferedOutputStream(socket.getOutputStream());
+    }
+
+    @Override
+    public void run() {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        try {
+            executorService.submit(this.handler).get(Robot.TIMEOUT_IN_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+        } catch (ExecutionException e) {
+        } catch (TimeoutException e) {
+            try {
+                System.err.printf("[%d]: Connection timed out\n", this.handler.getClientNumber());
+                this.outputStream.write("502 TIMEOUT\r\n".getBytes());
+                this.outputStream.flush();
+                this.socket.close();
+            } catch (IOException e1) {
+            }
+        }
+    }
+}
+
 
 /**
  * @author klimesf
@@ -539,9 +577,13 @@ class AwaitingINFOState extends AbstractState {
     }
 }
 
+/**
+ * @author klimesf
+ */
 class AwaitingFOTOState extends AbstractState {
 
     private ChecksumStatus checksumStatus;
+    private PhotoFileHandler photoFileHandler;
 
     /**
      * @param context
@@ -617,8 +659,7 @@ class AwaitingFOTOState extends AbstractState {
         long calculatedChecksum = 0;
 
         // Prepare file
-        PhotoFileHandler photoFileHandler = SingletonPhotoFileHandlerImpl.getInstance();
-        photoFileHandler.createFile("photo.jpg");
+        photoFileHandler = new PhotoFileHandlerImpl("foto" + this.context.getClientNumber() + ".png");
 
         // Calculate checksum and save the photo to file
         while (current != -1 && counter < numberOfBytes) {
@@ -626,7 +667,7 @@ class AwaitingFOTOState extends AbstractState {
             current = input.read();
             calculatedChecksum += current;
             counter++;
-            photoFileHandler.appendChar((char) current);
+            photoFileHandler.append(current);
         }
         photoFileHandler.close();
         return calculatedChecksum;
@@ -664,6 +705,7 @@ class AwaitingFOTOState extends AbstractState {
             this.checksumStatus = ChecksumStatus.OK;
         } else {
             this.checksumStatus = ChecksumStatus.BAD;
+            this.photoFileHandler.removeFile();
         }
 
         System.out.printf("[%d]: Calculated checksum: %d.\n", this.context.getClientNumber(), calculatedChecksum);
@@ -709,95 +751,71 @@ class AwaitingFOTOState extends AbstractState {
     }
 }
 
+/**
+ * @author klimesf
+ */
 interface PhotoFileHandler {
-
-    /**
-     * Opens file to be appended. If the file does not exist, creates a new one.
-     * <p/>
-     * <p>
-     * If a file was opened previously, another call of this function
-     * closes the output streams and opens new ones.
-     * </p>
-     *
-     * @param fileName Name of the file to be created.
-     * @return true if file was opened successfully, false if not.
-     */
-    boolean createFile(String fileName);
 
     /**
      * Appends char to the open file.
      *
-     * @param c The char to be appended.
+     * @param i The byte to be appended.
      * @return true if char was appended successfully, false if not.
      */
-    boolean appendChar(char c);
+    boolean append(int i);
 
     /**
      * Flushes the buffers and closes the open file.
      *
      * @return true if file was appended to and closed successfully, false if not.
      */
-    public boolean close();
+    boolean close();
 
+    /**
+     * Removes the opened file.
+     *
+     * @return true if file was removed successfully, false if not.
+     */
+    boolean removeFile();
 }
 
-class SingletonPhotoFileHandlerImpl implements PhotoFileHandler {
 
-    private static SingletonPhotoFileHandlerImpl instance;
-    private FileWriter fw;
-    private BufferedWriter bw;
+/**
+ * Singleton implementation of the PhotoFileHandler interface.
+ *
+ * @author klimesf
+ */
+class PhotoFileHandlerImpl implements PhotoFileHandler {
 
-    /**
-     * Private constructor following Singleton pattern.
-     */
-    private SingletonPhotoFileHandlerImpl() {
-    }
-
-    /**
-     * Returns instance of the PhotoFileHandler singleton.
-     * The instance is lazy loaded.
-     *
-     * @return The instance.
-     */
-    public static SingletonPhotoFileHandlerImpl getInstance() {
-        if (instance == null) {
-            instance = new SingletonPhotoFileHandlerImpl();
-        }
-        return instance;
-    }
+    private FileOutputStream fileOutputStream;
+    private String fileName;
 
     /**
-     * {@inheritDoc}
+     * Creates a new PhotoFileHandlerImpl which will write to the given file.
      */
-    public boolean createFile(String fileName) {
+    public PhotoFileHandlerImpl(String fileName) {
+        this.fileName = fileName;
+
         try {
             // If file was opened previously, close the streams
-            if (bw != null) {
+            if (this.fileOutputStream != null) {
                 this.close();
             }
 
-            File file = new File(fileName);
-            if (!file.exists()) {
-                file.createNewFile();
-            }
-
-            fw = new FileWriter(file.getAbsoluteFile());
-            bw = new BufferedWriter(fw, 2 << 19);
-
-            return true;
+            this.fileOutputStream = new FileOutputStream(fileName);
 
         } catch (IOException e) {
-            return false;
+//            throw new RuntimeException("Could not open photo file");
         }
     }
 
     /**
      * {@inheritDoc}
      */
-    public boolean appendChar(char c) {
+    public boolean append(int i) {
         try {
-            if (bw != null) {
-                bw.write(c);
+            if (fileOutputStream != null) {
+                fileOutputStream.write(i);
                 return true;
             } else {
                 return false;
@@ -812,9 +830,8 @@ class SingletonPhotoFileHandlerImpl implements PhotoFileHandler {
      */
     public boolean close() {
         try {
-            if (bw != null) {
-                bw.flush();
-                bw.close();
+            if (this.fileOutputStream != null) {
+                this.fileOutputStream.close();
                 return true;
             } else {
                 return false;
@@ -822,5 +839,14 @@ class SingletonPhotoFileHandlerImpl implements PhotoFileHandler {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean removeFile() {
+        File file = new File(this.fileName);
+        return file.delete();
     }
 }

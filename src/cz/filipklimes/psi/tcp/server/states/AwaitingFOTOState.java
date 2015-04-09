@@ -2,7 +2,7 @@ package cz.filipklimes.psi.tcp.server.states;
 
 import cz.filipklimes.psi.tcp.server.Client;
 import cz.filipklimes.psi.tcp.server.PhotoFileHandler;
-import cz.filipklimes.psi.tcp.server.SingletonPhotoFileHandlerImpl;
+import cz.filipklimes.psi.tcp.server.PhotoFileHandlerImpl;
 
 import java.io.*;
 
@@ -12,6 +12,7 @@ import java.io.*;
 public class AwaitingFOTOState extends AbstractState {
 
     private ChecksumStatus checksumStatus;
+    private PhotoFileHandler photoFileHandler;
 
     /**
      * @param context
@@ -87,8 +88,7 @@ public class AwaitingFOTOState extends AbstractState {
         long calculatedChecksum = 0;
 
         // Prepare file
-        PhotoFileHandler photoFileHandler = SingletonPhotoFileHandlerImpl.getInstance();
-        photoFileHandler.createFile("photo.jpg");
+        photoFileHandler = new PhotoFileHandlerImpl("foto" + this.context.getClientNumber() + ".png");
 
         // Calculate checksum and save the photo to file
         while (current != -1 && counter < numberOfBytes) {
@@ -96,7 +96,7 @@ public class AwaitingFOTOState extends AbstractState {
             current = input.read();
             calculatedChecksum += current;
             counter++;
-            photoFileHandler.appendChar((char) current);
+            photoFileHandler.append(current);
         }
         photoFileHandler.close();
         return calculatedChecksum;
@@ -134,6 +134,7 @@ public class AwaitingFOTOState extends AbstractState {
             this.checksumStatus = ChecksumStatus.OK;
         } else {
             this.checksumStatus = ChecksumStatus.BAD;
+            this.photoFileHandler.removeFile();
         }
 
         System.out.printf("[%d]: Calculated checksum: %d.\n", this.context.getClientNumber(), calculatedChecksum);
